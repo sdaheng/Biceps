@@ -100,12 +100,12 @@ extension BicepsError.BicepsUnimplementedMethodError: CustomStringConvertible {
 }
 
 // MARK: Service Layer
-public protocol BicepsServiceable {
+public protocol BicepsProvidable {
     func fetch(paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?)->Void) throws -> Biceps
     func send(paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?)->Void)  throws -> Biceps
 }
 
-public extension BicepsServiceable {
+public extension BicepsProvidable {
     func fetch(paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?)->Void) throws -> Biceps {
         throw BicepsError.BicepsUnimplementedMethodError.fetch
     }
@@ -116,7 +116,7 @@ public extension BicepsServiceable {
 }
 
 open class BicepsService {
-    open class func fetch<T: BicepsServiceable>(by provider: T, paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?) -> Void) throws {
+    open class func fetch<T: BicepsProvidable>(by provider: T, paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?) -> Void) throws {
         do {
             let biceps = try provider.fetch(paramater: paramater, resultBlock: resultBlock)
             
@@ -126,7 +126,7 @@ open class BicepsService {
         }
     }
     
-    open class func send<T: BicepsServiceable>(by provider: T, paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?) -> Void) throws {
+    open class func send<T: BicepsProvidable>(by provider: T, paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?) -> Void) throws {
         do {
             let biceps = try provider.send(paramater: paramater, resultBlock: resultBlock)
             
