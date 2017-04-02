@@ -84,17 +84,29 @@ open class BicepsConfiguration: BicepsConfigurable {
 
 // MARK: Biceps Errors
 public enum BicepsError: Error {
-    public enum BicepsUnimplementedMethodError: Error {
+    public enum UnimplementedMethodError: Error {
         case fetch
         case send
     }
+    
+    public enum DependencyError: Error {
+        case cycle
+    }
 }
 
-extension BicepsError.BicepsUnimplementedMethodError: CustomStringConvertible {
+extension BicepsError.UnimplementedMethodError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .fetch: return "BicepsUnimplementMethodError: not implement fetch method"
         case .send : return "BicepsUnimplementMethodError: not implement send method"
+        }
+    }
+}
+
+extension BicepsError.DependencyError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .cycle: return "Shouldn`t create a circular dependency"
         }
     }
 }
@@ -107,11 +119,22 @@ public protocol BicepsProvidable {
 
 public extension BicepsProvidable {
     func fetch(paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?)->Void) throws -> Biceps {
-        throw BicepsError.BicepsUnimplementedMethodError.fetch
+        throw BicepsError.UnimplementedMethodError.fetch
     }
     
     func send(paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?)->Void) throws -> Biceps {
-        throw BicepsError.BicepsUnimplementedMethodError.send
+        throw BicepsError.UnimplementedMethodError.send
+    }
+}
+
+class BicepsOperationQueue {
+    let operationQueue: OperationQueue
+    static let shared = BicepsOperationQueue()
+    
+    init() {
+        self.operationQueue = OperationQueue()
+        self.operationQueue.qualityOfService = .userInitiated
+        self.operationQueue.name = "com.body.biceps.operationQueue.request"
     }
 }
 
@@ -120,9 +143,9 @@ open class BicepsService {
         do {
             let biceps = try provider.fetch(paramater: paramater, resultBlock: resultBlock)
             
-            biceps.requestJSON()
+            try add(biceps, to: BicepsOperationQueue.shared.operationQueue)
         } catch {
-            throw BicepsError.BicepsUnimplementedMethodError.fetch
+            throw BicepsError.UnimplementedMethodError.fetch
         }
     }
     
@@ -130,10 +153,47 @@ open class BicepsService {
         do {
             let biceps = try provider.send(paramater: paramater, resultBlock: resultBlock)
             
-            biceps.requestJSON()
+            try add(biceps, to: BicepsOperationQueue.shared.operationQueue)
         } catch {
-            throw BicepsError.BicepsUnimplementedMethodError.send
+            throw BicepsError.UnimplementedMethodError.send
         }
+    }
+    
+    class func add(_ biceps: Biceps, to queue: OperationQueue) throws {
+        let operationQueue = queue
+        if let combinedRequests = biceps.combinedRequest {
+            operationQueue.addOperations(combinedRequests.map { (biceps) in
+                return BicepsOperation(biceps)
+            }, waitUntilFinished: false)
+        } else if biceps.hasDependency() {
+            guard let dependency = biceps.dependency, dependency != biceps else {
+                throw BicepsError.DependencyError.cycle
+            }
+            operationQueue.addOperations(resolveDependencyChain(from: biceps), waitUntilFinished: false)
+        } else {
+            operationQueue.addOperation(BicepsOperation(biceps))
+        }
+    }
+    
+    class func resolveDependencyChain(from head: Biceps) -> [BicepsOperation] {
+        var dependencyChain = head
+        var dependencyOperation = BicepsOperation(head)
+        var dependencyOperations = Set<BicepsOperation>()
+        while dependencyChain.hasDependency() {
+            if let depsDependency = dependencyChain.dependency {
+                
+                let depsDependencyOperation = BicepsOperation(depsDependency)
+                dependencyOperation.addDependency(depsDependencyOperation)
+                dependencyOperations.insert(dependencyOperation)
+                if !depsDependency.hasDependency() {
+                    dependencyOperations.insert(depsDependencyOperation)
+                }
+                dependencyOperation = depsDependencyOperation
+                dependencyChain = depsDependency
+            }
+        }
+        
+        return dependencyOperations.map { return $0 }
     }
 }
 
@@ -154,7 +214,9 @@ open class Biceps {
     internal lazy var delayTimeInterval: TimeInterval = 0
 
     internal var combinedRequest: [Biceps]?
+
     internal var dependency: Biceps?
+    
     internal lazy var configuration: BicepsConfiguration = BicepsConfiguration()
 
     internal lazy var dispatcher: Dispatcher = .request(.foreground)
@@ -231,7 +293,7 @@ extension Biceps {
         
         return biceps
     }
-    
+
     open func configuration(_ block: (BicepsConfiguration) -> Void) -> Biceps {
         block(self.configuration)
         return self
@@ -437,15 +499,11 @@ protocol BicepsRequestable {
                  fail: @escaping FailBlock) -> URLSessionTask?
 }
 
+let JSONMIMEType = "application/json"
+
 extension Biceps {
     open func requestJSON() {
-        if let combinedRequest = self.combinedRequest, combinedRequest.count > 0 {
-            for biceps in combinedRequest {
-                biceps.requestJSON()
-            }
-        } else {
-            request(for: self.internalType, contentType: "")
-        }
+        request(for: self.internalType, contentType: JSONMIMEType)
     }
     
     var requester: BicepsRequestable {
@@ -612,7 +670,7 @@ extension Biceps: Hashable, Equatable {
     }
     
     public static func ==(lhs: Biceps, rhs: Biceps) -> Bool {
-        return lhs.identifier == rhs.identifier
+        return lhs.identifier == rhs.identifier && lhs.internalURL == rhs.internalURL
     }
 }
 
@@ -634,6 +692,76 @@ extension Biceps {
     
     open func hasDependency() -> Bool {
         return dependency != nil
+    }
+}
+
+extension Biceps: CustomStringConvertible {
+    public var description: String {
+        return self.internalName
+    }
+}
+
+class BicepsOperation: Operation {
+    
+    var biceps: Biceps
+    
+    var _finished: Bool = false {
+        willSet {
+            self.willChangeValue(forKey: "isFinished")
+        }
+        
+        didSet {
+            self.didChangeValue(forKey: "isFinished")
+        }
+    }
+    var _executing: Bool = false {
+        willSet {
+            self.willChangeValue(forKey: "isExecuting")
+        }
+        
+        didSet {
+            self.didChangeValue(forKey: "isExecuting")
+        }
+    }
+    
+    init(_ biceps: Biceps) {
+        self.biceps = biceps
+    }
+
+    override func start() {
+
+        guard self.isReady else {
+            return
+        }
+        
+        let progress = biceps.internalProgressBlock
+        let success = biceps.internalSuccessBlock
+        let fail = biceps.internalFailBlock
+
+        biceps.progress({ (_progress) in
+            self._finished = false
+            self._executing = true
+            
+            progress(_progress)
+        }).success { (result) in
+            self._finished = true
+            self._executing = false
+            
+            success(result)
+        }.fail({ (error) in
+            self._finished = true
+            self._executing = false
+            
+            fail(error)
+        }).requestJSON()
+    }
+    
+    override var isExecuting: Bool {
+        return _executing
+    }
+    
+    override var isFinished: Bool {
+        return _finished
     }
 }
 
@@ -1094,7 +1222,7 @@ extension BicepsLogProtocol {
     }
 }
 
-let JSONAvaliableContentTypes = [ "application/json" ]
+let JSONAvaliableContentTypes = [ JSONMIMEType ]
 
 extension BicepsLogProtocol: BicepsLoggable {
     internal func log(level: BicepsLogLevel, task: URLSessionTask, metrics: URLSessionTaskMetrics) {
