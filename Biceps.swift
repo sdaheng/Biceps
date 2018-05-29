@@ -8,6 +8,7 @@
 
 import Foundation
 import Alamofire
+
 import SwiftProtobuf
 
 // MARK: Specific protocol independent layer
@@ -191,17 +192,27 @@ extension Biceps {
         }
     }
     
-    var jsonRequester: BicepsJSONRequestable {
+    var jsonRequester: BicepsJSONRequestable? {
         switch self.internalType {
         case .GET, .POST, .DELETE, .HEAD, .PUT, .PATCH, .OPTIONS, .TRACE, .CONNECT:
-            return BicepsHTTP.shared.jsonRequester
+            do {
+                return BicepsHTTP.shared.createJSONRequester(with: try self.internalURL.asURL(),
+                                                             and: self.internalType)
+            } catch {
+                return nil
+            }
         }
     }
     
-    var protobufRequester: BicepsProtobufRequestable {
+    var protobufRequester: BicepsProtobufRequestable? {
         switch self.internalType {
         case .GET, .POST, .DELETE, .HEAD, .PUT, .PATCH, .OPTIONS, .TRACE, .CONNECT:
-            return BicepsHTTP.shared.protobufRequester
+            do {
+                return BicepsHTTP.shared.createProtobufRequester(with: try self.internalURL.asURL(),
+                                                                 and: self.internalType)
+            } catch {
+                return nil
+            }
         }
     }
     
