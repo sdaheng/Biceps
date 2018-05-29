@@ -32,39 +32,17 @@ internal enum BicepsType {
 let defaultRequestName: String = "com.body.biceps.annoymous"
 
 public typealias ProgressBlock = (_ progress: Progress) -> Void
-public typealias SuccessBlock = (_ result: Dictionary<String, Any>) -> Void
+public typealias SuccessBlock = (_ result: Any) -> Void
 public typealias FailBlock = (_ error: Error) -> Void
 public typealias BackgroundCompletionHandler = () -> Void
 public typealias MultipartFormDataBlock = (MultipartFormData) -> Void
 
-// MARK: Biceps Errors
-public enum BicepsError: Error {
-    public enum UnimplementedMethodError: Error {
-        case fetch
-        case send
-    }
-    
-    public enum DependencyError: Error {
-        case cycle
-    }
-}
-
-extension BicepsError.UnimplementedMethodError: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case .fetch: return "BicepsUnimplementMethodError: not implement fetch method"
-        case .send : return "BicepsUnimplementMethodError: not implement send method"
-        }
-    }
-}
-
-extension BicepsError.DependencyError: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case .cycle: return "Shouldn`t create a circular dependency"
-        }
-    }
+public enum ParamaterEncodingType {
+    case URL
+    case JSON
+    case protobuf
 }
 
 let JSONMIMEType = "application/json"
-
+let ProtobufMIMEType = "application/x-protobuf"
+let BinaryMIMEType = "application/octet-stream"

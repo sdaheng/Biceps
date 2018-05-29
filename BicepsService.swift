@@ -24,17 +24,6 @@ public extension BicepsProvidable {
     }
 }
 
-class BicepsOperationQueue {
-    let operationQueue: OperationQueue
-    static let shared = BicepsOperationQueue()
-    
-    init() {
-        self.operationQueue = OperationQueue()
-        self.operationQueue.qualityOfService = .userInitiated
-        self.operationQueue.name = "com.body.biceps.operationQueue.request"
-    }
-}
-
 open class BicepsService {
     open class func fetch<T: BicepsProvidable>(by provider: T, paramater: [String:Any]?, resultBlock: @escaping (_ result: Any?) -> Void) throws {
         do {
@@ -66,7 +55,8 @@ open class BicepsService {
             guard let dependency = biceps.dependency, dependency != biceps else {
                 throw BicepsError.DependencyError.cycle
             }
-            operationQueue.addOperations(resolveDependencyChain(from: biceps), waitUntilFinished: false)
+            operationQueue.addOperations(resolveDependencyChain(from: biceps),
+                                         waitUntilFinished: false)
         } else {
             operationQueue.addOperation(BicepsOperation(biceps))
         }

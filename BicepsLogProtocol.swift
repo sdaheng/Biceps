@@ -11,6 +11,14 @@ import Foundation
 // MARK: Custom URLProtocol for default interceptor
 let BicepsLogRequestKey = "BicepsLogRequestKey"
 
+internal protocol BicepsLoggable {
+    func log(level: BicepsLogLevel, request: URLRequest)
+    func log(level: BicepsLogLevel, task: URLSessionTask, data: Data)
+    func log(level: BicepsLogLevel, task: URLSessionTask, error: Error)
+    @available(iOS 10.0, *)
+    func log(level: BicepsLogLevel, task: URLSessionTask, metrics: URLSessionTaskMetrics)
+}
+
 internal class BicepsLogProtocol: URLProtocol {
     private lazy var activeTask: URLSessionTask? = nil
     
@@ -73,6 +81,7 @@ extension BicepsLogProtocol {
 let JSONAvaliableContentTypes = [ JSONMIMEType ]
 
 extension BicepsLogProtocol: BicepsLoggable {
+    @available(iOS 10.0, *)
     internal func log(level: BicepsLogLevel, task: URLSessionTask, metrics: URLSessionTaskMetrics) {
         guard level == .All || level == .Debug else {
             return
@@ -88,9 +97,9 @@ extension BicepsLogProtocol: BicepsLoggable {
         
         var logMessage = "[\(level)] Request "
         
-        logMessage += "URL: \(request.url)\n"
-        logMessage += "method: \(request.httpMethod)\n"
-        logMessage += "headers: \(request.allHTTPHeaderFields)\n"
+        logMessage += "URL: \(String(describing: request.url))\n"
+        logMessage += "method: \(String(describing: request.httpMethod))\n"
+        logMessage += "headers: \(String(describing: request.allHTTPHeaderFields))\n"
         
         print(logMessage)
     }
@@ -102,12 +111,12 @@ extension BicepsLogProtocol: BicepsLoggable {
         
         var logMessage = "[\(level)] Response "
         
-        logMessage += "URL: \(task.response?.url)\n"
+        logMessage += "URL: \(String(describing: task.response?.url))\n"
         
         let httpResponse = task.response as! HTTPURLResponse
         
         if level == .All || level == .Debug {
-            logMessage += "MIME-type: \(task.response?.mimeType)\n"
+            logMessage += "MIME-type: \(String(describing: task.response?.mimeType))\n"
             logMessage += "Status code: \(httpResponse.statusCode)\n"
             logMessage += "Headers: \(httpResponse.allHeaderFields))\n"
         }
@@ -135,7 +144,7 @@ extension BicepsLogProtocol: BicepsLoggable {
         var logMessage = "[\(level)]"
         
         if let httpResponse = task.response as? HTTPURLResponse {
-            logMessage += "URL: \(task.originalRequest?.url)"
+            logMessage += "URL: \(String(describing: task.originalRequest?.url))"
             logMessage += "Status code: \(httpResponse.statusCode)\n"
         }
         
@@ -157,6 +166,7 @@ extension BicepsLogProtocol: URLSessionDataDelegate, URLSessionDelegate {
         self.client?.urlProtocol(self, didLoad: data)
     }
     
+    @available(iOS 10.0, *)
     func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
         log(level: BicepsGeneralConfiguration.shared.logLevel, task: task, metrics: metrics)
     }

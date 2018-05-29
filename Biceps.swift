@@ -8,13 +8,20 @@
 
 import Foundation
 import Alamofire
+import SwiftProtobuf
 
 // MARK: Specific protocol independent layer
 open class Biceps {
 
     internal var internalType: BicepsType
     internal lazy var internalName: String = defaultRequestName
-    internal lazy var internalParamaters: [String : Any]? = nil
+    
+    internal lazy var internalMessage: Message? = nil
+    internal lazy var internalMessageData: Data? = nil
+    
+    internal lazy var internalParamaters: ParameterConvertible? = nil
+    internal lazy var internalParameterEncodingType: ParamaterEncodingType = .URL
+    
     internal lazy var internalURL: String! = ""
     
     internal lazy var internalProgressBlock: ProgressBlock = {_ in }
@@ -29,9 +36,9 @@ open class Biceps {
 
     internal var dependency: Biceps?
     
-    internal lazy var configuration: BicepsConfiguration = BicepsConfiguration()
+    internal lazy var internalConfiguration: BicepsConfiguration = BicepsConfiguration()
 
-    internal lazy var dispatcher: Dispatcher = .request(.foreground)
+    internal lazy var dispatcher: Dispatcher = .request(.foreground, .type(.URL, nil))
     
     lazy var identifier: Int = {
         if let dataTask = self.internalDataTask {
@@ -55,8 +62,13 @@ open class Biceps {
 }
 
 extension Biceps {
-    open func paramaters(_ paramaters: [String : Any]?) -> Biceps {
+    open func paramaters(_ paramaters: ParameterConvertible?) -> Biceps {
         self.internalParamaters = paramaters
+        return self
+    }
+    
+    open func parameterEncodingType(_ parameterEncodingType: ParamaterEncodingType) -> Biceps {
+        self.internalParameterEncodingType = parameterEncodingType
         return self
     }
     
@@ -66,7 +78,7 @@ extension Biceps {
     }
     
     open func headers(_ headers: [String : String]) -> Biceps {
-        self.configuration.headers = headers
+        self.internalConfiguration.headers = headers
         return self
     }
 }
@@ -107,12 +119,12 @@ extension Biceps {
     }
 
     open func configuration(_ block: (BicepsConfiguration) -> Void) -> Biceps {
-        block(self.configuration)
+        block(self.internalConfiguration)
         return self
     }
     
     private func log(_ level: BicepsLogLevel) -> Biceps {
-        self.configuration.logLevel = level
+        self.internalConfiguration.logLevel = level
         return self
     }
     
@@ -167,184 +179,70 @@ extension Biceps {
 }
 
 extension Biceps {
-    internal enum Dispatcher {
-        
-        internal enum Disposition {
-            case foreground
-            case background
-            case resumeable
-        }
-        
-        internal enum Operation {
-            case start
-            case resume
-            case suspend
-            case cancel
-        }
-        
-        internal enum Uploadable {
-            case file(String)
-            case multipart(MultipartFormDataBlock)
-            #if unimplement
-            case data
-            case stream
-            #endif
-        }
-        
-        internal enum Downloadable {
-            case file(String)
-        }
-        
-        case request(Disposition)
-        case upload(Disposition, Uploadable)
-        case download(Disposition, Downloadable)
-        
-        func dispatch(_ biceps: Biceps, with operation: Operation) {
-            switch self {
-            case let .request(disposition):
-                switch disposition {
-                case .foreground:
-                    dispatch(biceps, to: biceps.requester, with: operation)
-                default:
-                    break
-                }
-            case let .upload(disposition, uploadable):
-                switch disposition {
-                case .foreground:
-                    dispatch(biceps, to: biceps.uploader, with: operation, and: uploadable)
-                case .background:
-                    dispatch(biceps, to: biceps.backgroundUploader, with: operation, and: uploadable)
-                case .resumeable: break
-                }
-            case let .download(disposition, downloadable):
-                switch disposition {
-                case .foreground:
-                    dispatch(biceps, to: biceps.downloader, with: operation, and: downloadable)
-                case .background:
-                    dispatch(biceps, to: biceps.backgroundDownloader, with: operation, and: downloadable)
-                case .resumeable:
-                    dispatch(biceps, to: biceps.resumeDownloader, with: operation, and: downloadable)
-                }
-            }
-        }
-        
-        func dispatch(_ biceps: Biceps, to requester: BicepsRequestable, with operation: Operation) {
-            switch operation {
-            case .start:
-                biceps.internalDataTask = requester.request(URL: Foundation.URL(string: biceps.internalURL)!,
-                                                            paramaters: biceps.internalParamaters,
-                                                            configuration: biceps.configuration,
-                                                            method: biceps.internalType,
-                                                            progress: biceps.internalProgressBlock,
-                                                            success: biceps.internalSuccessBlock,
-                                                            fail: biceps.internalFailBlock)
-            case .resume: fallthrough
-            case .suspend: fallthrough
-            case .cancel: break
-            }
-        }
-        
-        func dispatch(_ biceps: Biceps, to downloader: BicepsDownloadable?,
-                      with operation: Operation, and downloadable: Downloadable) {
-            switch operation {
-            case .start:
-                switch downloadable {
-                case let .file(filePath):
-                biceps.internalDataTask = downloader?.download(URL: biceps.internalURL,
-                                                              paramater: biceps.internalParamaters,
-                                                              configuration: biceps.configuration,
-                                                              destination: Foundation.URL(fileURLWithPath: filePath),
-                                                              progress: biceps.internalProgressBlock,
-                                                              success: biceps.internalSuccessBlock,
-                                                              fail: biceps.internalFailBlock)
-                }
-            case .resume:
-                downloader?.resume(biceps.internalDataTask!)
-            case .suspend:
-                downloader?.suspend(biceps.internalDataTask!)
-            case .cancel:
-                downloader?.cancel(biceps.internalDataTask!)
-            }
-        }
-        
-        func dispatch(_ biceps: Biceps, to uploader: BicepsUploadable?,
-                      with operation: Operation, and uploadble: Uploadable) {
-            switch operation {
-            case .start:
-                switch uploadble {
-                case let .file(filePath):
-                    biceps.internalDataTask = uploader?.upload(URL: Foundation.URL(string: biceps.internalURL)!,
-                                                               filePath: filePath, headers: biceps.configuration.headers,
-                                                               progress: biceps.internalProgressBlock,
-                                                               success: biceps.internalSuccessBlock,
-                                                               fail: biceps.internalFailBlock)
-                case let .multipart(multipartFormDataBlock):
-                    biceps.internalDataTask = uploader?.upload(URL: Foundation.URL(string: biceps.internalURL)!,
-                                                               mutipartFormData: multipartFormDataBlock,
-                                                               headers: biceps.configuration.headers,
-                                                               progress: biceps.internalProgressBlock,
-                                                               success: biceps.internalSuccessBlock,
-                                                               fail: biceps.internalFailBlock)
-                }
-            case .resume:
-                uploader?.resume(biceps.internalDataTask!)
-            case .suspend:
-                uploader?.suspend(biceps.internalDataTask!)
-            case .cancel:
-                uploader?.cancel(biceps.internalDataTask!)
-            }
-        }
-    }
-}
-
-protocol BicepsOperatable {
-    func cancel(_ task: URLSessionTask)
-    func resume(_ task: URLSessionTask)
-    func suspend(_ task: URLSessionTask)
-}
-
-protocol BicepsRequestable {
-    func request(URL: URL, paramaters: [String:Any]?, configuration: BicepsConfigurable,
-                 method: BicepsType,
-                 progress: @escaping ProgressBlock,
-                 success: @escaping SuccessBlock,
-                 fail: @escaping FailBlock) -> URLSessionTask?
-}
-
-extension Biceps {
-    open func requestJSON() {
-        request(for: self.internalType, contentType: JSONMIMEType)
-    }
-    
-    var requester: BicepsRequestable {
+    var requester: BicepsURLRequestable? {
         switch self.internalType {
         case .GET, .POST, .DELETE, .HEAD, .PUT, .PATCH, .OPTIONS, .TRACE, .CONNECT:
-            return BicepsHTTP.Requester()
+            do {
+                return BicepsHTTP.shared.createURLRequester(with: try self.internalURL.asURL(),
+                                                            and: self.internalType)
+            } catch {
+                return nil
+            }
         }
     }
     
-    private func request(for bicepsType: BicepsType, contentType: String) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
-            self.dispatcher = .request(.foreground)
+    var jsonRequester: BicepsJSONRequestable {
+        switch self.internalType {
+        case .GET, .POST, .DELETE, .HEAD, .PUT, .PATCH, .OPTIONS, .TRACE, .CONNECT:
+            return BicepsHTTP.shared.jsonRequester
+        }
+    }
+    
+    var protobufRequester: BicepsProtobufRequestable {
+        switch self.internalType {
+        case .GET, .POST, .DELETE, .HEAD, .PUT, .PATCH, .OPTIONS, .TRACE, .CONNECT:
+            return BicepsHTTP.shared.protobufRequester
+        }
+    }
+    
+    open func request() {
+        self.dispatchRequest(for: self.internalType,
+                             paramaterEncodingType: .URL,
+                             paramaters: self.internalParamaters)
+    }
+    
+    open func requestJSON() {
+        self.dispatchRequest(for: self.internalType,
+                             paramaterEncodingType: .JSON,
+                             paramaters: self.internalParamaters)
+    }
+    
+    internal func dispatchRequest(for bicepsType: BicepsType,
+                                  paramaterEncodingType: ParamaterEncodingType,
+                                  paramaters: ParameterConvertible?) {
+        Scheduler().delay(self.delayTimeInterval) { 
+            self.dispatcher = .request(.foreground, .type(paramaterEncodingType, paramaters))
             self.dispatcher.dispatch(self, with: .start)
         }
     }
 }
 
-protocol BicepsUploadable: BicepsOperatable {
-    func upload(URL: URL, filePath: String, headers: [String:String]?,
-                progress: @escaping ProgressBlock,
-                success: @escaping SuccessBlock,
-                fail: @escaping FailBlock) -> URLSessionTask?
+public extension Biceps {
+    func message<T: Message>(_ _message: T) -> Biceps {
+        self.internalMessage = _message;
+        do {
+            self.internalMessageData = try _message.serializedData()
+        } catch {
+        }
+        
+        return self
+    }
     
-    func upload(URL: URL, mutipartFormData: @escaping (MultipartFormData) -> Void,
-                headers: [String:String]?,
-                progress: @escaping ProgressBlock,
-                success: @escaping SuccessBlock,
-                fail: @escaping FailBlock) -> URLSessionTask?
-}
-
-protocol BicepsBackgroundUploadable: BicepsUploadable {
+    func requestProtobuf() {
+        self.dispatchRequest(for: self.internalType,
+                             paramaterEncodingType: .protobuf,
+                             paramaters: self.internalMessageData)
+    }
 }
 
 extension Biceps {
@@ -357,14 +255,14 @@ extension Biceps {
     }
     
     open func upload(from filePath: String) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) { 
             self.dispatcher = .upload(.foreground, .file(filePath))
             self.dispatcher.dispatch(self, with: .start)
         }
     }
     
     open func upload(from multipartFormData: @escaping(MultipartFormData) -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) {
             self.dispatcher = .upload(.background, .multipart(multipartFormData))
             self.dispatcher.dispatch(self, with: .start)
         }
@@ -382,33 +280,20 @@ public extension Biceps {
     }
     
     public func backgroundUpload(_ filePath: String) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) {
             self.dispatcher = .upload(.background, .file(filePath))
             self.dispatcher.dispatch(self, with: .start)
         }
     }
     
     public func backgroundUpload(_ multipartFormData: @escaping(MultipartFormData) -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) {
             self.dispatcher = .upload(.foreground, .multipart(multipartFormData))
             self.dispatcher.dispatch(self, with: .start)
         }
     }
 }
 
-protocol BicepsDownloadable: BicepsOperatable {
-    func download(URL: URLConvertible, paramater: [String:Any]?,
-                  configuration: BicepsConfigurable, destination: URL,
-                  progress: @escaping ProgressBlock,
-                  success: @escaping SuccessBlock,
-                  fail: @escaping FailBlock) -> URLSessionTask?
-}
-
-protocol BicepsBackgroundDownloadable: BicepsDownloadable {
-}
-
-protocol BicepsResumeDownloadable: BicepsDownloadable {
-}
 
 public extension Biceps {
     
@@ -420,7 +305,7 @@ public extension Biceps {
     }
     
     func download(to path: String) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) {
             self.dispatcher = .download(.foreground, .file(path))
             self.dispatcher.dispatch(self, with: .start)
         }
@@ -436,7 +321,7 @@ public extension Biceps {
     }
     
     func backgroundDownload(to path: String) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) {
             self.dispatcher = .download(.background, .file(path))
             self.dispatcher.dispatch(self, with: .start)
         }
@@ -452,7 +337,7 @@ public extension Biceps {
     }
     
     public func resumeDownload(to path: String) {
-        DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + self.delayTimeInterval) {
+        Scheduler().delay(self.delayTimeInterval) {
             self.dispatcher = .download(.resumeable, .file(path))
             self.dispatcher.dispatch(self, with: .start)
         }
@@ -511,70 +396,6 @@ extension Biceps: CustomStringConvertible {
     }
 }
 
-class BicepsOperation: Operation {
-    
-    var biceps: Biceps
-    
-    var _finished: Bool = false {
-        willSet {
-            self.willChangeValue(forKey: "isFinished")
-        }
-        
-        didSet {
-            self.didChangeValue(forKey: "isFinished")
-        }
-    }
-    var _executing: Bool = false {
-        willSet {
-            self.willChangeValue(forKey: "isExecuting")
-        }
-        
-        didSet {
-            self.didChangeValue(forKey: "isExecuting")
-        }
-    }
-    
-    init(_ biceps: Biceps) {
-        self.biceps = biceps
-    }
-
-    override func start() {
-
-        guard self.isReady else {
-            return
-        }
-        
-        let progress = biceps.internalProgressBlock
-        let success = biceps.internalSuccessBlock
-        let fail = biceps.internalFailBlock
-
-        biceps.progress({ (_progress) in
-            self._finished = false
-            self._executing = true
-            
-            progress(_progress)
-        }).success { (result) in
-            self._finished = true
-            self._executing = false
-            
-            success(result)
-        }.fail({ (error) in
-            self._finished = true
-            self._executing = false
-            
-            fail(error)
-        }).requestJSON()
-    }
-    
-    override var isExecuting: Bool {
-        return _executing
-    }
-    
-    override var isFinished: Bool {
-        return _finished
-    }
-}
-
 // MARK: Biceps Interceptor
 public protocol BicepsInterceptable {
     var customURLProtocols: Array<AnyClass>? { get }
@@ -588,9 +409,44 @@ public extension BicepsInterceptable {
     }
 }
 
-internal protocol BicepsLoggable {
-    func log(level: BicepsLogLevel, request: URLRequest)
-    func log(level: BicepsLogLevel, task: URLSessionTask, data: Data)
-    func log(level: BicepsLogLevel, task: URLSessionTask, error: Error)
-    func log(level: BicepsLogLevel, task: URLSessionTask, metrics: URLSessionTaskMetrics)
+extension Dictionary: ParameterConvertible {
+    public func asDictionary() throws -> [String : Any]? {
+        return self as? [String : Any]
+    }
+    
+    public func asMessage() throws -> SwiftProtobuf.Google_Protobuf_Any? {
+        throw BicepsError.InvalidateParameterError.protobufMessage
+    }
+    
+    public func asData() throws -> Data? {
+        return nil
+    }
+}
+
+extension SwiftProtobuf.Google_Protobuf_Any: ParameterConvertible {
+    public func asDictionary() throws -> [String : Any]? {
+        throw BicepsError.InvalidateParameterError.dictionary
+    }
+    
+    public func asMessage() throws -> SwiftProtobuf.Google_Protobuf_Any? {
+        return self
+    }
+    
+    public func asData() throws -> Data? {
+        return nil
+    }
+}
+
+extension Data: ParameterConvertible {
+    public func asDictionary() throws -> [String : Any]? {
+        return nil;
+    }
+    
+    public func asMessage() throws -> Google_Protobuf_Any? {
+        return nil;
+    }
+    
+    public func asData() throws -> Data? {
+        return self
+    }
 }
