@@ -8,7 +8,10 @@
 
 import Foundation
 import Alamofire
+
+#if canImport(SwiftProtobuf)
 import SwiftProtobuf
+#endif
 
 protocol BicepsRequestSerializer {
     
@@ -19,6 +22,8 @@ protocol BicepsResponseSerializer {
 }
 
 struct ProtobufEncoding: ParameterEncoding {
+    
+    #if canImport(SwiftProtobuf)
     var message: SwiftProtobuf.Message?
     var messageData: Data?
     
@@ -56,6 +61,7 @@ struct ProtobufEncoding: ParameterEncoding {
         
         return _urlRequest
     }
+    #endif
 }
 
 extension DataRequest {

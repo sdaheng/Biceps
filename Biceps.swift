@@ -9,7 +9,9 @@
 import Foundation
 import Alamofire
 
+#if canImport(SwiftProtobuf)
 import SwiftProtobuf
+#endif
 
 // MARK: Specific protocol independent layer
 open class Biceps {
@@ -239,6 +241,7 @@ extension Biceps {
 }
 
 public extension Biceps {
+    #if canImport(SwiftProtobuf)
     func message<T: Message>(_ _message: T) -> Biceps {
         self.internalMessage = _message;
         do {
@@ -254,6 +257,7 @@ public extension Biceps {
                              paramaterEncodingType: .protobuf,
                              paramaters: self.internalMessageData)
     }
+    #endif
 }
 
 extension Biceps {
@@ -439,9 +443,11 @@ extension SwiftProtobuf.Google_Protobuf_Any: ParameterConvertible {
         throw BicepsError.InvalidateParameterError.dictionary
     }
     
+    #if canImport(SwiftProtobuf)
     public func asMessage() throws -> SwiftProtobuf.Google_Protobuf_Any? {
         return self
     }
+    #endif
     
     public func asData() throws -> Data? {
         return nil
@@ -453,9 +459,11 @@ extension Data: ParameterConvertible {
         return nil;
     }
     
+    #if canImport(SwiftProtobuf)
     public func asMessage() throws -> Google_Protobuf_Any? {
         return nil;
     }
+    #endif
     
     public func asData() throws -> Data? {
         return self

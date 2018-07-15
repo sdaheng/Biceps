@@ -8,7 +8,10 @@
 
 import Foundation
 import Alamofire
+
+#if canImport(SwiftProtobuf)
 import SwiftProtobuf
+#endif
 
 // MARK: Real request layer
 
